@@ -20,24 +20,25 @@ executors:
       - image: cimg/base:stable
 
 commands:
-  restore_deps:
-    description: Descarga el código, restaura la caché del entorno virtual y lo crea si no existe
+    restore_deps:
+    description: Descarga el código, restaura la caché del entorno virtual y lo reconstruye si no es válido
     steps:
       - checkout
       - restore_cache:
           keys:
-            - v1-venv-{{ arch }}-{{ checksum "requirements.txt" }}
+            - v2-venv-{{ arch }}-{{ checksum "requirements.txt" }}
       - run:
-          name: Instalar dependencias (se omite con caché vigente)
+          name: Instalar dependencias (se omite con caché válida)
           command: |
-            if [ -f venv/bin/activate ]; then
-              echo "Caché vigente: requirements.txt no cambió, se omite la instalación."
+            if [ -x venv/bin/python ] && venv/bin/python -c "import django, pytest, flake8, bandit" 2>/dev/null; then
+              echo "Caché válida: el entorno virtual funciona, se omite la instalación."
             else
+              echo "Caché ausente o inválida: se reconstruye el entorno virtual."
+              rm -rf venv
               python -m venv venv
               . venv/bin/activate
               pip install -r requirements.txt pytest pytest-django pytest-cov flake8 bandit
             fi
-
   wait_for_db:
     description: Espera a que PostgreSQL acepte conexiones
     steps:
