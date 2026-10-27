@@ -1,0 +1,122 @@
+version: 2.1
+
+description: Ejecutores y comandos reutilizables del pipeline de Delycattessen
+
+executors:
+  python-pg:
+    parameters:
+      python_version:
+        type: string
+        default: "3.12"
+    docker:
+      - image: cimg/python:<< parameters.python_version >>
+        environment:
+          DB_NAME: test_db
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: localhost
+          DB_PORT: "5432"
+          PAYPHONE_API_URL: https://example.com/api
+          PAYPHONE_RESPONSE_URL: http://localhost:8000/api/wallet/payphone/callback/
+          PAYPHONE_REDIRECT_BASE_URL: http://localhost:8000/api/wallet/payphone/redirect/
+          WALLET_RECHARGE_GATEWAY_THRESHOLD: "5.00"
+          KUSHKI_API_URL: https://example.com
+      - image: cimg/postgres:16.4
+        environment:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+  notifier:
+    docker:
+      - image: cimg/base:stable
+
+commands:
+  restore_deps:
+    description: Descarga el código, restaura la caché del entorno virtual y lo crea si no existe
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-venv-{{ arch }}-{{ checksum "requirements.txt" }}
+      - run:
+          name: Instalar dependencias (se omite con caché vigente)
+          command: |
+            if [ -f venv/bin/activate ]; then
+              echo "Caché vigente: requirements.txt no cambió, se omite la instalación."
+            else
+              python -m venv venv
+              . venv/bin/activate
+              pip install -r requirements.txt pytest pytest-django pytest-cov flake8 bandit
+            fi
+
+  wait_for_db:
+    description: Espera a que PostgreSQL acepte conexiones
+    steps:
+      - run:
+          name: Esperar a PostgreSQL
+          command: timeout 60 bash -c 'until (echo > /dev/tcp/localhost/5432) 2>/dev/null; do sleep 1; done'
+
+  notify:
+    description: Envía una tarjeta a Discord con el estado del pipeline
+    parameters:
+      estado:
+        type: string
+      emoji:
+        type: string
+      color:
+        type: integer
+      detalle:
+        type: string
+      cuando:
+        type: enum
+        enum: ["always", "on_success", "on_fail"]
+        default: "on_success"
+    steps:
+      - run:
+          name: Notificar a Discord (<< parameters.estado >>)
+          when: << parameters.cuando >>
+          command: |
+            if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+              echo "ERROR: la variable DISCORD_WEBHOOK_URL no está definida en el proyecto"
+              exit 1
+            fi
+            MSG=$(git log -1 --pretty=%s 2>/dev/null | sed 's/\\/\\\\/g; s/"/\\"/g')
+            if [ -z "$MSG" ]; then MSG="(sin mensaje)"; fi
+            AUTOR=$(git log -1 --pretty=%an 2>/dev/null | sed 's/\\/\\\\/g; s/"/\\"/g')
+            if [ -z "$AUTOR" ]; then AUTOR="desconocido"; fi
+            URL="${CIRCLE_BUILD_URL:-https://app.circleci.com}"
+            REPO="${CIRCLE_PROJECT_REPONAME:-proyecto}"
+            RAMA="${CIRCLE_BRANCH:-n/d}"
+            NUM="${CIRCLE_BUILD_NUM:-n/d}"
+            SHA=$(echo "${CIRCLE_SHA1:-nodisponible}" | cut -c1-7)
+            curl -sS -w "\nHTTP %{http_code}\n" -X POST -H "Content-Type: application/json" "$DISCORD_WEBHOOK_URL" -d @- \<<EOF
+            {
+              "username": "CircleCI",
+              "embeds": [{
+                "title": "<< parameters.emoji >> Pipeline << parameters.estado >>",
+                "description": "<< parameters.detalle >>\n\n🔗 [Ver ejecución en CircleCI](${URL})",
+                "url": "${URL}",
+                "color": << parameters.color >>,
+                "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+                "fields": [
+                  {"name": "Proyecto", "value": "${REPO}", "inline": true},
+                  {"name": "Rama", "value": "${RAMA}", "inline": true},
+                  {"name": "Build", "value": "#${NUM}", "inline": true},
+                  {"name": "Commit", "value": "${SHA}", "inline": true},
+                  {"name": "Autor", "value": "${AUTOR}", "inline": true},
+                  {"name": "Cambio", "value": "${MSG}", "inline": false}
+                ],
+                "footer": {"text": "CircleCI · ${REPO}"}
+              }]
+            }
+            EOF
+
+  notify_fail:
+    description: Aviso de fallo; solo se ejecuta si un paso anterior del job falló
+    steps:
+      - notify:
+          estado: "FALLIDO"
+          emoji: "❌"
+          color: 15548997
+          detalle: "Falló el job **${CIRCLE_JOB}**. Abre el enlace y revisa el paso marcado en rojo."
+          cuando: on_fail
