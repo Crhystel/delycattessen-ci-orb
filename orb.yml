@@ -10,22 +10,11 @@ executors:
         default: "3.12"
     docker:
       - image: cimg/python:<< parameters.python_version >>
-        environment:
-          DB_NAME: test_db
-          DB_USER: postgres
-          DB_PASSWORD: postgres
-          DB_HOST: localhost
-          DB_PORT: "5432"
-          PAYPHONE_API_URL: https://example.com/api
-          PAYPHONE_RESPONSE_URL: http://localhost:8000/api/wallet/payphone/callback/
-          PAYPHONE_REDIRECT_BASE_URL: http://localhost:8000/api/wallet/payphone/redirect/
-          WALLET_RECHARGE_GATEWAY_THRESHOLD: "5.00"
-          KUSHKI_API_URL: https://example.com
       - image: cimg/postgres:16.4
         environment:
           POSTGRES_DB: test_db
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
   notifier:
     docker:
       - image: cimg/base:stable
