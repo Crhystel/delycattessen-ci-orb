@@ -20,7 +20,7 @@ executors:
       - image: cimg/base:stable
 
 commands:
-    restore_deps:
+  restore_deps:
     description: Descarga el código, restaura la caché del entorno virtual y lo reconstruye si no es válido
     steps:
       - checkout
@@ -39,6 +39,7 @@ commands:
               . venv/bin/activate
               pip install -r requirements.txt pytest pytest-django pytest-cov flake8 bandit
             fi
+
   wait_for_db:
     description: Espera a que PostgreSQL acepte conexiones
     steps:
